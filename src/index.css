@@ -2866,3 +2866,10 @@ body,
   color: var(--text-muted);
   font-size: 0.9rem;
 }
+
+.action-error {
+  font-size: 0.72rem;
+  color: #f87171;
+  padding: 2px 4px;
+  margin-bottom: 4px;
+}

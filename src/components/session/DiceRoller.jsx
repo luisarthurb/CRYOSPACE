@@ -19,6 +19,7 @@ export default function DiceRoller({ onRoll }) {
             result = roll(notation);
         }
 
+        result.narrative = formatRoll(result);
         setLastResult(result);
         onRoll?.(result);
     };
@@ -28,6 +29,7 @@ export default function DiceRoller({ onRoll }) {
         const notation = e.target.elements.notation.value.trim();
         if (!notation) return;
         const result = roll(notation);
+        result.narrative = formatRoll(result);
         setLastResult(result);
         onRoll?.(result);
         e.target.reset();

@@ -1,14 +1,40 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useSessionStore } from '../store/sessionStore';
+import { formatRoll } from '../engine/diceEngine';
 
+/**
+ * useSession hook — connects to a Supabase session with Realtime.
+ * Uses granular Zustand selectors to prevent unnecessary re-renders.
+ * Caches the current user to avoid repeated auth calls.
+ */
 export function useSession(sessionId) {
-    const store = useSessionStore();
     const mountedRef = useRef(true);
+    const cachedUserIdRef = useRef(null);
+
+    // Use GRANULAR selectors — only subscribe to state we actually need.
+    // This prevents the 300-cell grid from re-rendering when unrelated state changes.
+    const session = useSessionStore((s) => s.session);
+    const tokens = useSessionStore((s) => s.tokens);
+    const logs = useSessionStore((s) => s.logs);
+    const initiativeOrder = useSessionStore((s) => s.initiativeOrder);
+    const currentTurn = useSessionStore((s) => s.currentTurn);
+    const roundNumber = useSessionStore((s) => s.roundNumber);
+    const fogState = useSessionStore((s) => s.fogState);
+    const isGm = useSessionStore((s) => s.isGm);
+    const selectedTokenId = useSessionStore((s) => s.selectedTokenId);
+    const highlightedTiles = useSessionStore((s) => s.highlightedTiles);
 
     useEffect(() => {
         mountedRef.current = true;
         return () => { mountedRef.current = false; };
+    }, []);
+
+    // Cache the current user ID on mount
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => {
+            cachedUserIdRef.current = data?.user?.id || null;
+        });
     }, []);
 
     // Fetch session data
@@ -17,6 +43,7 @@ export function useSession(sessionId) {
         try {
             const { data } = await supabase.from('sessions').select('*').eq('id', sessionId).single();
             if (data && mountedRef.current) {
+                const store = useSessionStore.getState();
                 store.setSession(data);
                 store.setFogState(data.fog_state || {});
                 store.setInitiativeOrder(data.initiative_order || []);
@@ -34,7 +61,7 @@ export function useSession(sessionId) {
         if (!sessionId) return;
         try {
             const { data } = await supabase.from('session_tokens').select('*').eq('session_id', sessionId);
-            if (data && mountedRef.current) store.setTokens(data);
+            if (data && mountedRef.current) useSessionStore.getState().setTokens(data);
         } catch (err) {
             if (err?.name === 'AbortError') return;
         }
@@ -50,7 +77,7 @@ export function useSession(sessionId) {
                 .eq('session_id', sessionId)
                 .order('created_at', { ascending: true })
                 .limit(200);
-            if (data && mountedRef.current) store.setLogs(data);
+            if (data && mountedRef.current) useSessionStore.getState().setLogs(data);
         } catch (err) {
             if (err?.name === 'AbortError') return;
         }
@@ -63,6 +90,10 @@ export function useSession(sessionId) {
             fetchTokens();
             fetchLogs();
         }
+        return () => {
+            // Reset session on unmount
+            useSessionStore.getState().resetSession();
+        };
     }, [sessionId, fetchSession, fetchTokens, fetchLogs]);
 
     // Realtime subscriptions
@@ -79,6 +110,7 @@ export function useSession(sessionId) {
             filter: `session_id=eq.${sessionId}`,
         }, (payload) => {
             if (!mountedRef.current) return;
+            const store = useSessionStore.getState();
             if (payload.eventType === 'INSERT') {
                 store.addToken(payload.new);
             } else if (payload.eventType === 'UPDATE') {
@@ -96,7 +128,7 @@ export function useSession(sessionId) {
             filter: `session_id=eq.${sessionId}`,
         }, (payload) => {
             if (!mountedRef.current) return;
-            store.addLog(payload.new);
+            useSessionStore.getState().addLog(payload.new);
         });
 
         // Listen for session changes (initiative, turn, fog, status)
@@ -108,6 +140,7 @@ export function useSession(sessionId) {
         }, (payload) => {
             if (!mountedRef.current) return;
             const s = payload.new;
+            const store = useSessionStore.getState();
             store.setSession(s);
             store.setFogState(s.fog_state || {});
             store.setInitiativeOrder(s.initiative_order || []);
@@ -122,72 +155,72 @@ export function useSession(sessionId) {
         };
     }, [sessionId]);
 
-    // === ACTIONS ===
+    // === ACTIONS (all use getState() to avoid stale closures) ===
 
-    const moveToken = async (tokenId, x, y) => {
-        store.moveToken(tokenId, x, y); // Optimistic
+    const moveToken = useCallback(async (tokenId, x, y) => {
+        useSessionStore.getState().moveToken(tokenId, x, y); // Optimistic
         await supabase.from('session_tokens').update({ x, y }).eq('id', tokenId);
-    };
+    }, []);
 
-    const updateTokenHp = async (tokenId, hp) => {
-        store.updateToken(tokenId, { hp });
+    const updateTokenHp = useCallback(async (tokenId, hp) => {
+        useSessionStore.getState().updateToken(tokenId, { hp });
         await supabase.from('session_tokens').update({ hp }).eq('id', tokenId);
-    };
+    }, []);
 
-    const addTokenCondition = async (tokenId, condition) => {
-        const token = store.tokens.find((t) => t.id === tokenId);
+    const addTokenCondition = useCallback(async (tokenId, condition) => {
+        const token = useSessionStore.getState().tokens.find((t) => t.id === tokenId);
         if (!token) return;
         const conditions = [...(token.conditions || [])];
         if (!conditions.includes(condition)) conditions.push(condition);
-        store.updateToken(tokenId, { conditions });
+        useSessionStore.getState().updateToken(tokenId, { conditions });
         await supabase.from('session_tokens').update({ conditions }).eq('id', tokenId);
-    };
+    }, []);
 
-    const removeTokenCondition = async (tokenId, condition) => {
-        const token = store.tokens.find((t) => t.id === tokenId);
+    const removeTokenCondition = useCallback(async (tokenId, condition) => {
+        const token = useSessionStore.getState().tokens.find((t) => t.id === tokenId);
         if (!token) return;
         const conditions = (token.conditions || []).filter((c) => c !== condition);
-        store.updateToken(tokenId, { conditions });
+        useSessionStore.getState().updateToken(tokenId, { conditions });
         await supabase.from('session_tokens').update({ conditions }).eq('id', tokenId);
-    };
+    }, []);
 
-    const spawnToken = async (tokenData) => {
+    const spawnToken = useCallback(async (tokenData) => {
         const { data } = await supabase
             .from('session_tokens')
             .insert({ ...tokenData, session_id: sessionId })
             .select()
             .single();
         return data;
-    };
+    }, [sessionId]);
 
-    const removeTokenFromSession = async (tokenId) => {
+    const removeTokenFromSession = useCallback(async (tokenId) => {
         await supabase.from('session_tokens').delete().eq('id', tokenId);
-    };
+    }, []);
 
-    const sendLog = async (type, content, rollResult = null, metadata = {}) => {
-        const { data: { user } } = await supabase.auth.getUser();
+    const sendLog = useCallback(async (type, content, rollResult = null, metadata = {}) => {
         await supabase.from('session_logs').insert({
             session_id: sessionId,
-            user_id: user?.id,
+            user_id: cachedUserIdRef.current,
             type,
             content,
             roll_result: rollResult,
             metadata,
         });
-    };
+    }, [sessionId]);
 
-    const updateInitiative = async (order, currentTurn = 0, roundNumber = 1) => {
+    const updateInitiative = useCallback(async (order, turn = 0, round = 1) => {
+        const store = useSessionStore.getState();
         store.setInitiativeOrder(order);
-        store.setCurrentTurn(currentTurn);
-        store.setRoundNumber(roundNumber);
+        store.setCurrentTurn(turn);
+        store.setRoundNumber(round);
         await supabase.from('sessions').update({
             initiative_order: order,
-            current_turn: currentTurn,
-            round_number: roundNumber,
+            current_turn: turn,
+            round_number: round,
         }).eq('id', sessionId);
-    };
+    }, [sessionId]);
 
-    const advanceTurn = async () => {
+    const advanceTurn = useCallback(async () => {
         const { initiativeOrder, currentTurn, roundNumber } = useSessionStore.getState();
         const next = currentTurn + 1;
         if (next >= initiativeOrder.length) {
@@ -195,19 +228,34 @@ export function useSession(sessionId) {
         } else {
             await updateInitiative(initiativeOrder, next, roundNumber);
         }
-    };
+    }, [updateInitiative]);
 
-    const updateFog = async (fogState) => {
-        store.setFogState(fogState);
-        await supabase.from('sessions').update({ fog_state: fogState }).eq('id', sessionId);
-    };
+    const updateFog = useCallback(async (newFogState) => {
+        useSessionStore.getState().setFogState(newFogState);
+        await supabase.from('sessions').update({ fog_state: newFogState }).eq('id', sessionId);
+    }, [sessionId]);
 
-    const updateSessionStatus = async (status) => {
+    const revealTile = useCallback(async (key) => {
+        const store = useSessionStore.getState();
+        const newFog = { ...store.fogState, [key]: true };
+        store.setFogState(newFog);
+        await supabase.from('sessions').update({ fog_state: newFog }).eq('id', sessionId);
+    }, [sessionId]);
+
+    const selectToken = useCallback((id) => {
+        useSessionStore.getState().selectToken(id);
+    }, []);
+
+    const setIsGm = useCallback((val) => {
+        useSessionStore.getState().setIsGm(val);
+    }, []);
+
+    const updateSessionStatus = useCallback(async (status) => {
         await supabase.from('sessions').update({ status }).eq('id', sessionId);
-    };
+    }, [sessionId]);
 
-    return {
-        ...store,
+    // Stable actions object — only recreated if sessionId changes
+    const actions = useMemo(() => ({
         fetchSession,
         fetchTokens,
         fetchLogs,
@@ -221,6 +269,31 @@ export function useSession(sessionId) {
         updateInitiative,
         advanceTurn,
         updateFog,
+        revealTile,
+        selectToken,
+        setIsGm,
         updateSessionStatus,
+    }), [
+        fetchSession, fetchTokens, fetchLogs,
+        moveToken, updateTokenHp, addTokenCondition, removeTokenCondition,
+        spawnToken, removeTokenFromSession, sendLog,
+        updateInitiative, advanceTurn, updateFog, revealTile,
+        selectToken, setIsGm, updateSessionStatus,
+    ]);
+
+    return {
+        // State (granular)
+        session,
+        tokens,
+        logs,
+        initiativeOrder,
+        currentTurn,
+        roundNumber,
+        fogState,
+        isGm,
+        selectedTokenId,
+        highlightedTiles,
+        // Actions
+        ...actions,
     };
 }

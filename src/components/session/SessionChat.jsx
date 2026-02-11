@@ -1,4 +1,28 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo, memo } from 'react';
+
+const TYPE_ICONS = {
+    chat: '💬',
+    action: '⚔️',
+    dice: '🎲',
+    combat: '⚔️',
+    system: '⚙️',
+    narrative: '📜',
+};
+
+// Memoized chat message to prevent re-rendering entire log on each new entry
+const ChatMessage = memo(function ChatMessage({ log }) {
+    return (
+        <div className={`chat-message type-${log.type}`}>
+            <span className="chat-icon">{TYPE_ICONS[log.type] || '💬'}</span>
+            <div className="chat-content">
+                <span className="chat-text">{formatSafe(log.content)}</span>
+                <span className="chat-time">
+                    {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+            </div>
+        </div>
+    );
+});
 
 export default function SessionChat({ logs, onSendMessage }) {
     const inputRef = useRef(null);
@@ -9,7 +33,7 @@ export default function SessionChat({ logs, onSendMessage }) {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [logs]);
+    }, [logs.length]); // Only react to length changes, not content
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -19,26 +43,11 @@ export default function SessionChat({ logs, onSendMessage }) {
         inputRef.current.value = '';
     };
 
-    const TYPE_ICONS = {
-        chat: '💬',
-        action: '⚔️',
-        dice: '🎲',
-        combat: '⚔️',
-        system: '⚙️',
-        narrative: '📜',
-    };
-
     return (
         <div className="session-chat">
             <div className="chat-messages" ref={scrollRef}>
                 {logs.map((log) => (
-                    <div key={log.id} className={`chat-message type-${log.type}`}>
-                        <span className="chat-icon">{TYPE_ICONS[log.type] || '💬'}</span>
-                        <div className="chat-content">
-                            <span className="chat-text" dangerouslySetInnerHTML={{ __html: formatContent(log.content) }} />
-                            <span className="chat-time">{new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                    </div>
+                    <ChatMessage key={log.id} log={log} />
                 ))}
                 {logs.length === 0 && (
                     <div className="chat-empty">Session log is empty. Start playing!</div>
@@ -57,7 +66,17 @@ export default function SessionChat({ logs, onSendMessage }) {
     );
 }
 
-function formatContent(text) {
-    // Bold: **text**
-    return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+/**
+ * Safe format: renders **bold** text as React elements instead of innerHTML.
+ * This prevents XSS from user-submitted content.
+ */
+function formatSafe(text) {
+    if (!text) return '';
+    const parts = text.split(/(\*\*.*?\*\*)/g);
+    return parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={i}>{part.slice(2, -2)}</strong>;
+        }
+        return part;
+    });
 }

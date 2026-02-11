@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { rollAllInitiative } from '../../engine/combatEngine';
-import { CONDITIONS } from '../../engine/combatEngine';
+import React, { useState, useCallback } from 'react';
+import { rollAllInitiative, CONDITIONS } from '../../engine/combatEngine';
 
 export default function GMDashboard({ session }) {
     const [spawnForm, setSpawnForm] = useState({ label: '', hp: 20, ac: 10, x: 5, y: 5 });

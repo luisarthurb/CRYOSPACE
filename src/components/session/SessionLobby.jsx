@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
-import { useCampaigns } from '../../hooks/useCampaign';
 
 export default function SessionLobby() {
     const { campaignId } = useParams();
@@ -14,19 +13,28 @@ export default function SessionLobby() {
     const [players, setPlayers] = useState([]);
     const [creating, setCreating] = useState(false);
     const [error, setError] = useState('');
+    const mountedRef = useRef(true);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+    }, []);
 
     useEffect(() => {
         if (!campaignId) return;
         // Fetch campaign
         supabase.from('campaigns').select('*').eq('id', campaignId).single()
-            .then(({ data }) => setCampaign(data));
+            .then(({ data }) => { if (data && mountedRef.current) setCampaign(data); })
+            .catch(() => { });
         // Fetch maps
         supabase.from('maps').select('*').eq('campaign_id', campaignId)
-            .then(({ data }) => setMaps(data || []));
+            .then(({ data }) => { if (mountedRef.current) setMaps(data || []); })
+            .catch(() => { });
         // Fetch players
         supabase.from('campaign_players').select('*, profiles(display_name, avatar_url), characters(name, race, class)')
             .eq('campaign_id', campaignId)
-            .then(({ data }) => setPlayers(data || []));
+            .then(({ data }) => { if (mountedRef.current) setPlayers(data || []); })
+            .catch(() => { });
     }, [campaignId]);
 
     const handleStartSession = async () => {

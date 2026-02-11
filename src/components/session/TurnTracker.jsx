@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { memo } from 'react';
 
-export default function TurnTracker({ initiative, currentTurn, roundNumber, tokens, isGm, onAdvanceTurn }) {
+const TurnTracker = memo(function TurnTracker({ initiative, currentTurn, roundNumber, tokens, isGm, onAdvanceTurn }) {
     if (!initiative || initiative.length === 0) {
         return (
             <div className="turn-tracker">
@@ -45,4 +45,6 @@ export default function TurnTracker({ initiative, currentTurn, roundNumber, toke
             </div>
         </div>
     );
-}
+});
+
+export default TurnTracker;
