@@ -8,6 +8,8 @@ import PromptBar from './components/PromptBar';
 import CharacterList from './components/characters/CharacterList';
 import CampaignList from './components/loreweaver/CampaignList';
 import CampaignEditor from './components/loreweaver/CampaignEditor';
+import SessionLobby from './components/session/SessionLobby';
+import SessionView from './components/session/SessionView';
 
 function MapForge() {
     return (
@@ -32,6 +34,8 @@ export default function App() {
                         <Route path="/characters" element={<CharacterList />} />
                         <Route path="/loreweaver" element={<CampaignList />} />
                         <Route path="/loreweaver/:id" element={<CampaignEditor />} />
+                        <Route path="/session/new/:campaignId" element={<SessionLobby />} />
+                        <Route path="/session/:sessionId" element={<SessionView />} />
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>
                 </div>
