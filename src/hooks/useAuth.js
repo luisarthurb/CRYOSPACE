@@ -1,20 +1,26 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 export function useAuth() {
     const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
+    const mountedRef = useRef(true);
 
     // Fetch profile from DB
     const fetchProfile = useCallback(async (userId) => {
         try {
-            const { data } = await supabase
+            const { data, error } = await supabase
                 .from('profiles')
                 .select('*')
                 .eq('id', userId)
                 .single();
-            setProfile(data);
+            if (error) {
+                // Profile doesn't exist yet (new user) — that's OK, skip silently
+                console.warn('Profile fetch:', error.message);
+                return;
+            }
+            if (mountedRef.current) setProfile(data);
         } catch (err) {
             if (err?.name === 'AbortError') return;
             console.error('fetchProfile error:', err);
@@ -22,17 +28,20 @@ export function useAuth() {
     }, []);
 
     useEffect(() => {
-        // Get initial session
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            const currentUser = session?.user ?? null;
-            setUser(currentUser);
-            if (currentUser) fetchProfile(currentUser.id);
-            setLoading(false);
-        });
+        mountedRef.current = true;
 
-        // Listen for auth changes
+        // Safety timeout: never get stuck on loading screen for more than 8s
+        const timeout = setTimeout(() => {
+            if (mountedRef.current && loading) {
+                console.warn('Auth loading timed out — showing login page');
+                setLoading(false);
+            }
+        }, 8000);
+
+        // 1. Set up auth listener FIRST (before getSession, per Supabase docs)
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (_event, session) => {
+                if (!mountedRef.current) return;
                 const currentUser = session?.user ?? null;
                 setUser(currentUser);
                 if (currentUser) {
@@ -44,7 +53,28 @@ export function useAuth() {
             }
         );
 
-        return () => subscription.unsubscribe();
+        // 2. Then get the current session
+        supabase.auth.getSession()
+            .then(({ data: { session } }) => {
+                if (!mountedRef.current) return;
+                const currentUser = session?.user ?? null;
+                setUser(currentUser);
+                if (currentUser) {
+                    fetchProfile(currentUser.id);
+                }
+                setLoading(false);
+            })
+            .catch((err) => {
+                // Supabase unreachable, project paused, network issue, etc.
+                console.error('getSession failed:', err);
+                if (mountedRef.current) setLoading(false);
+            });
+
+        return () => {
+            mountedRef.current = false;
+            clearTimeout(timeout);
+            subscription.unsubscribe();
+        };
     }, [fetchProfile]);
 
     const signInWithEmail = async (email, password) => {
@@ -95,7 +125,7 @@ export function useAuth() {
             .select()
             .single();
         if (error) throw error;
-        setProfile(data);
+        if (mountedRef.current) setProfile(data);
         return data;
     };
 
